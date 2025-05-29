@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:ai_pdf_viewer/services/env_handler.dart';
 import 'package:http/http.dart' as http;
 
 abstract class Summarizer {
@@ -10,12 +11,11 @@ abstract class Summarizer {
       }
 
       final response = await http.post(
-        Uri.parse('https://ai-pdf-summarizer-api.vercel.app/ai/summarize'),
+        Uri.parse('${EnvHandler.getBaseUrl()}/summarize'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'text': text,
-          'token':
-              '',
+          'token': EnvHandler.getApiToken(),
         }),
       );
 
