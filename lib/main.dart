@@ -66,6 +66,8 @@ class _PDFState extends State<PDF> {
   bool isLoading = false;
   String? pdfPath;
   PdfDocument? pdfDocument;
+  int currentPage = 1;
+  int totalPages = 0;
 
   @override
   void initState() {
@@ -88,6 +90,8 @@ class _PDFState extends State<PDF> {
             pdfPath = path;
             pdfDocument = document;
             selectedText = ''; // Clear any previous selection
+            totalPages = document.pages.length;
+            currentPage = 1;
           });
         }
       }
@@ -113,7 +117,7 @@ class _PDFState extends State<PDF> {
         body: jsonEncode({
           'text': text,
           'token':
-              '',
+          '',
         }),
       );
 
@@ -206,50 +210,87 @@ class _PDFState extends State<PDF> {
           IconButton(icon: const Icon(Icons.file_open), onPressed: pickPDF),
         ],
       ),
-      body:
+      body: Stack(
+        children: [
           pdfDocument == null
               ? const Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.picture_as_pdf, size: 64, color: Colors.grey),
-                    SizedBox(height: 16),
-                    Text(
-                      'Pick a PDF file to view',
-                      style: TextStyle(fontSize: 18, color: Colors.grey),
-                    ),
-                  ],
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.picture_as_pdf, size: 64, color: Colors.grey),
+                SizedBox(height: 16),
+                Text(
+                  'Pick a PDF file to view',
+                  style: TextStyle(fontSize: 18, color: Colors.grey),
                 ),
-              )
+              ],
+            ),
+          )
               : PdfViewer.file(
-                pdfPath!,
-                controller: _pdfViewerController,
-                params: PdfViewerParams(
-                  enableTextSelection: true,
-                  onTextSelectionChange: (selections) {
-                    if (selections.isNotEmpty) {
-                      final selectedTextContent = selections
-                          .map((selection) => selection.text)
-                          .join(' ');
-                      setState(() {
-                        selectedText = selectedTextContent;
-                      });
-                      // Show selection options immediately
-                      WidgetsBinding.instance.addPostFrameCallback((_) {});
-                    } else {
-                      setState(() {
-                        selectedText = '';
-                      });
-                    }
-                  },
+            pdfPath!,
+            controller: _pdfViewerController,
+            params: PdfViewerParams(
+              enableTextSelection: true,
+              onViewerReady: (document, controller) {
+                // Update total pages when viewer is ready
+                setState(() {
+                  totalPages = document.pages.length;
+                });
+              },
+              onPageChanged: (pageNumber) {
+                setState(() {
+                  currentPage = pageNumber!;
+                });
+              },
+              onTextSelectionChange: (selections) {
+                if (selections.isNotEmpty) {
+                  final selectedTextContent = selections
+                      .map((selection) => selection.text)
+                      .join(' ');
+                  setState(() {
+                    selectedText = selectedTextContent;
+                  });
+                  // Show selection options immediately
+                  WidgetsBinding.instance.addPostFrameCallback((_) {});
+                } else {
+                  setState(() {
+                    selectedText = '';
+                  });
+                }
+              },
+            ),
+          ),
+          // Page indicator
+          if (pdfDocument != null)
+            Positioned(
+              bottom: 20,
+              left: 0,
+              right: 0,
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.8),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    '$currentPage / $totalPages',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
                 ),
               ),
+            ),
+        ],
+      ),
     );
   }
 
   @override
   void dispose() {
-    // _pdfViewerController.dispose();
     pdfDocument?.dispose();
     super.dispose();
   }
