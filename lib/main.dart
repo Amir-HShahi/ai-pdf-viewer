@@ -1,10 +1,10 @@
 import 'dart:convert';
-import 'dart:io';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
-import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
-import 'package:file_picker/file_picker.dart';
+import 'package:pdfrx/pdfrx.dart';
 
 void main() {
   runApp(const MyApp());
@@ -65,18 +65,12 @@ class _PDFState extends State<PDF> {
   String selectedText = '';
   bool isLoading = false;
   String? pdfPath;
+  PdfDocument? pdfDocument;
 
   @override
   void initState() {
     super.initState();
     _pdfViewerController = PdfViewerController();
-    _pdfViewerController.addListener(avoidShowingOptions);
-  }
-
-  void avoidShowingOptions() {
-    if (selectedText.isNotEmpty) {
-      Navigator.pop(context);
-    }
   }
 
   Future<void> pickPDF() async {
@@ -87,12 +81,23 @@ class _PDFState extends State<PDF> {
       );
 
       if (result != null) {
-        setState(() {
-          pdfPath = result.files.single.path;
-        });
+        final path = result.files.single.path;
+        if (path != null) {
+          final document = await PdfDocument.openFile(path);
+          setState(() {
+            pdfPath = path;
+            pdfDocument = document;
+            selectedText = ''; // Clear any previous selection
+          });
+        }
       }
     } catch (e) {
       debugPrint('Error picking PDF: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error loading PDF: $e')));
+      }
     }
   }
 
@@ -108,7 +113,7 @@ class _PDFState extends State<PDF> {
         body: jsonEncode({
           'text': text,
           'token':
-          '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',
+              '',
         }),
       );
 
@@ -133,7 +138,6 @@ class _PDFState extends State<PDF> {
   }
 
   void showSummaryDialog(String text) async {
-    Navigator.pop(context);
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -146,8 +150,9 @@ class _PDFState extends State<PDF> {
               future: getSummary(text),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(
-                    child: CircularProgressIndicator(),
+                  return const SizedBox(
+                    height: 100,
+                    child: Center(child: CircularProgressIndicator()),
                   );
                 } else if (snapshot.hasError) {
                   return Text('Error: ${snapshot.error}');
@@ -184,9 +189,7 @@ class _PDFState extends State<PDF> {
               onPressed: () {
                 Clipboard.setData(ClipboardData(text: selectedText));
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Text copied to clipboard'),
-                  ),
+                  const SnackBar(content: Text('Text copied to clipboard')),
                 );
                 setState(() {
                   selectedText = '';
@@ -200,34 +203,54 @@ class _PDFState extends State<PDF> {
               },
             ),
           ],
-          IconButton(
-            icon: const Icon(Icons.file_open),
-            onPressed: pickPDF,
-          ),
+          IconButton(icon: const Icon(Icons.file_open), onPressed: pickPDF),
         ],
       ),
-      body: pdfPath == null
-          ? const Center(
-        child: Text('Pick a PDF file to view'),
-      )
-          : SfPdfViewer.file(
-        File(pdfPath!),
-        controller: _pdfViewerController,
-        onTextSelectionChanged: (PdfTextSelectionChangedDetails details) {
-          if (details.selectedText != null &&
-              details.selectedText!.isNotEmpty) {
-            setState(() {
-              selectedText = details.selectedText!;
-            });
-          }
-        },
-      ),
+      body:
+          pdfDocument == null
+              ? const Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.picture_as_pdf, size: 64, color: Colors.grey),
+                    SizedBox(height: 16),
+                    Text(
+                      'Pick a PDF file to view',
+                      style: TextStyle(fontSize: 18, color: Colors.grey),
+                    ),
+                  ],
+                ),
+              )
+              : PdfViewer.file(
+                pdfPath!,
+                controller: _pdfViewerController,
+                params: PdfViewerParams(
+                  enableTextSelection: true,
+                  onTextSelectionChange: (selections) {
+                    if (selections.isNotEmpty) {
+                      final selectedTextContent = selections
+                          .map((selection) => selection.text)
+                          .join(' ');
+                      setState(() {
+                        selectedText = selectedTextContent;
+                      });
+                      // Show selection options immediately
+                      WidgetsBinding.instance.addPostFrameCallback((_) {});
+                    } else {
+                      setState(() {
+                        selectedText = '';
+                      });
+                    }
+                  },
+                ),
+              ),
     );
   }
 
   @override
   void dispose() {
-    _pdfViewerController.dispose();
+    // _pdfViewerController.dispose();
+    pdfDocument?.dispose();
     super.dispose();
   }
 }
