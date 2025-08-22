@@ -1,0 +1,269 @@
+# .github/workflows/build-and-release.yml
+name: Build and Release Flutter App
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'  # Triggers on version tags like v1.0.0
+  workflow_dispatch:  # Allows manual trigger
+    inputs:
+      version:
+        description: 'Release version'
+        required: true
+        default: '1.0.0'
+
+jobs:
+  # Build for Android
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.3'
+          channel: 'stable'
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Run tests
+        run: flutter test
+
+      - name: Build Android APK
+        run: flutter build apk --release
+
+      - name: Build Android App Bundle
+        run: flutter build appbundle --release
+
+      - name: Upload Android artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-builds
+          path: |
+            build/app/outputs/flutter-apk/app-release.apk
+            build/app/outputs/bundle/release/app-release.aab
+
+  # Build for iOS
+  build-ios:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.3'
+          channel: 'stable'
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Run tests
+        run: flutter test
+
+      - name: Build iOS (without signing)
+        run: |
+          flutter build ios --release --no-codesign
+          cd build/ios/iphoneos
+          mkdir -p Payload
+          cp -r Runner.app Payload/
+          zip -r app-release.ipa Payload/
+
+      - name: Upload iOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-builds
+          path: build/ios/iphoneos/app-release.ipa
+
+  # Build for Windows
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.3'
+          channel: 'stable'
+
+      - name: Enable Windows desktop
+        run: flutter config --enable-windows-desktop
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Run tests
+        run: flutter test
+
+      - name: Build Windows
+        run: flutter build windows --release
+
+      - name: Create Windows ZIP
+        run: |
+          cd build\windows\x64\runner\Release
+          powershell Compress-Archive -Path * -DestinationPath ..\..\..\..\windows-release.zip
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-builds
+          path: build/windows-release.zip
+
+  # Build for Linux
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y ninja-build libgtk-3-dev
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.3'
+          channel: 'stable'
+
+      - name: Enable Linux desktop
+        run: flutter config --enable-linux-desktop
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Run tests
+        run: flutter test
+
+      - name: Build Linux
+        run: flutter build linux --release
+
+      - name: Create Linux tar.gz
+        run: |
+          cd build/linux/x64/release/bundle
+          tar -czf ../../../../../linux-release.tar.gz *
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-builds
+          path: build/linux-release.tar.gz
+
+  # Create Release
+  create-release:
+    needs: [build-android, build-ios, build-windows, build-linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get version
+        id: version
+        run: |
+          if [[ ${{ github.event_name }} == 'push' ]]; then
+            VERSION=${GITHUB_REF#refs/tags/}
+          else
+            VERSION=v${{ github.event.inputs.version }}
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+
+      - name: Display structure of downloaded files
+        run: ls -la ./artifacts/**/*
+
+      - name: Rename files for release
+        run: |
+          mkdir -p ./release-files
+          
+          # Android files
+          cp ./artifacts/android-builds/app-release.apk ./release-files/ai_pdf_viewer-${{ steps.version.outputs.version }}-android.apk
+          cp ./artifacts/android-builds/app-release.aab ./release-files/ai_pdf_viewer-${{ steps.version.outputs.version }}-android.aab
+          
+          # iOS files
+          cp ./artifacts/ios-builds/app-release.ipa ./release-files/ai_pdf_viewer-${{ steps.version.outputs.version }}-ios.ipa
+          
+          # Windows files
+          cp ./artifacts/windows-builds/windows-release.zip ./release-files/ai_pdf_viewer-${{ steps.version.outputs.version }}-windows.zip
+          
+          # Linux files
+          cp ./artifacts/linux-builds/linux-release.tar.gz ./release-files/ai_pdf_viewer-${{ steps.version.outputs.version }}-linux.tar.gz
+
+      - name: Create Release Notes
+        run: |
+          cat > RELEASE_NOTES.md << 'EOF'
+          # AI PDF Viewer ${{ steps.version.outputs.version }}
+          
+          ## Downloads
+          
+          ### Android
+          - **APK**: `ai_pdf_viewer-${{ steps.version.outputs.version }}-android.apk` - Direct installation file
+          - **AAB**: `ai_pdf_viewer-${{ steps.version.outputs.version }}-android.aab` - For Google Play Store
+          
+          ### iOS
+          - **IPA**: `ai_pdf_viewer-${{ steps.version.outputs.version }}-ios.ipa` - iOS installation file (requires proper code signing for device installation)
+          
+          ### Windows
+          - **ZIP**: `ai_pdf_viewer-${{ steps.version.outputs.version }}-windows.zip` - Extract and run the executable
+          
+          ### Linux
+          - **TAR.GZ**: `ai_pdf_viewer-${{ steps.version.outputs.version }}-linux.tar.gz` - Extract and run the executable
+          
+          ## Installation Instructions
+          
+          ### Android
+          1. Download the APK file
+          2. Enable "Install from unknown sources" in your device settings
+          3. Install the APK file
+          
+          ### Windows
+          1. Download and extract the ZIP file
+          2. Run `ai_pdf_viewer.exe`
+          
+          ### Linux
+          1. Download and extract the tar.gz file
+          2. Make the executable file runnable: `chmod +x ai_pdf_viewer`
+          3. Run the application: `./ai_pdf_viewer`
+          
+          ### iOS
+          Note: The IPA file is not code-signed. For actual iOS deployment, you'll need to:
+          1. Have an Apple Developer account
+          2. Code sign the app properly
+          3. Distribute through App Store or TestFlight
+          
+          ---
+          
+          Built with ❤️ using Flutter
+          EOF
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: AI PDF Viewer ${{ steps.version.outputs.version }}
+          body_path: RELEASE_NOTES.md
+          files: |
+            ./release-files/*
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
