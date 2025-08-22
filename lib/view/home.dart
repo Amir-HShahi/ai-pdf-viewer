@@ -1,8 +1,15 @@
-import 'package:ai_pdf_viewer/services/summarizer.dart';
-import 'package:file_picker/file_picker.dart';
+import 'dart:async';
+
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:pdfrx/pdfrx.dart';
+
+import '../services/pdf_file_service.dart';
+import '../services/pdf_state_persistence.dart';
+import '../services/ui_interaction_service.dart';
+import '../utils/app_colors.dart';
+import '../utils/app_constants.dart';
+import '../utils/ui_helpers.dart';
+import '../view_model/home_view_model.dart';
 
 class Home extends StatefulWidget {
   const Home({super.key});
@@ -11,144 +18,78 @@ class Home extends StatefulWidget {
   State<Home> createState() => _HomeState();
 }
 
-class _HomeState extends State<Home> {
-  late final PdfViewerController _pdfViewerController;
-
-  String selectedText = '';
-  String? pdfPath;
-  PdfDocument? pdfDocument;
-  int currentPage = 1;
-  int totalPages = 0;
+class _HomeState extends State<Home> with TickerProviderStateMixin {
+  late final HomeViewModel _viewModel;
+  final UiInteractionService _uiService = UiInteractionService();
 
   @override
   void initState() {
     super.initState();
-    _pdfViewerController = PdfViewerController();
+    _viewModel = HomeViewModel(
+      vsync: this,
+      pdfFileService: PdfFileService(),
+      pdfStatePersistenceService: PdfStatePersistenceService(),
+    );
+    _viewModel.addListener(_onViewModelUpdate);
+    _viewModel.initialize();
   }
 
   @override
   void dispose() {
-    pdfDocument?.dispose();
+    _viewModel.removeListener(_onViewModelUpdate);
+    _viewModel.dispose();
     super.dispose();
   }
 
-  Future<void> _pickPDF() async {
-    try {
-      final result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['pdf'],
-      );
-
-      if (result?.files.single.path case final String path) {
-        final document = await PdfDocument.openFile(path);
-        setState(() {
-          pdfPath = path;
-          pdfDocument = document;
-          selectedText = '';
-          totalPages = document.pages.length;
-          currentPage = 1;
-        });
-      }
-    } catch (e) {
-      debugPrint('Error picking PDF: $e');
-      if (mounted) {
-        _showErrorSnackBar('Error loading PDF: $e');
-      }
+  void _onViewModelUpdate() {
+    if (mounted) {
+      setState(() {});
     }
   }
 
   void _showErrorSnackBar(String message) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    UIHelpers.showSnackBar(context, message);
   }
 
-  void _showSummaryDialog(String text) {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder:
-          (context) => AlertDialog(
-            title: const Text('Summary'),
-            content: SizedBox(
-              width: double.maxFinite,
-              child: FutureBuilder<String>(
-                future: Summarizer.getSummary(text),
-                builder: (context, snapshot) {
-                  return switch (snapshot.connectionState) {
-                    ConnectionState.waiting => const SizedBox(
-                      height: 100,
-                      child: Center(child: CircularProgressIndicator()),
-                    ),
-                    _ when snapshot.hasError => Text(
-                      'Error: ${snapshot.error}',
-                    ),
-                    _ => SingleChildScrollView(
-                      child: Text(snapshot.data ?? 'No summary available'),
-                    ),
-                  };
-                },
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Close'),
-              ),
-            ],
-          ),
+  @override
+  Widget build(BuildContext context) {
+    final appBarHeight = MediaQuery.of(context).padding.top + kToolbarHeight;
+
+    return Scaffold(
+      extendBodyBehindAppBar: true,
+      body: Stack(
+        children: [
+          _viewModel.pdfDocument == null
+              ? _buildEmptyState()
+              : _buildPdfViewer(),
+          if (_viewModel.pdfDocument != null) _buildPageIndicator(),
+          if (_viewModel.pdfDocument != null) _buildScrollHandle(),
+          _buildAnimatedAppBar(appBarHeight),
+        ],
+      ),
     );
   }
 
-  void _copySelectedText() {
-    Clipboard.setData(ClipboardData(text: selectedText));
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('Text copied to clipboard')));
-    setState(() {
-      selectedText = '';
-    });
-  }
-
-  void _onPageChanged(int? pageNumber) {
-    if (pageNumber != null) {
-      setState(() {
-        currentPage = pageNumber;
-      });
-    }
-  }
-
-  void _onTextSelectionChange(selections) {
-    if (selections.isNotEmpty) {
-      final selectedTextContent = selections
-          .map((selection) => selection.text)
-          .join(' ');
-      setState(() {
-        selectedText = selectedTextContent;
-      });
-    } else {
-      setState(() {
-        selectedText = '';
-      });
-    }
-  }
-
-  void _onViewerReady(PdfDocument document, PdfViewerController controller) {
-    setState(() {
-      totalPages = document.pages.length;
-    });
-  }
+  // Widget Builders
 
   Widget _buildEmptyState() {
     return const Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.picture_as_pdf, size: 64, color: Colors.grey),
+          Icon(
+            Icons.picture_as_pdf,
+            size: 64,
+            color: AppColors.whiteTransparent07,
+          ),
           SizedBox(height: 16),
           Text(
             'Pick a PDF file to view',
-            style: TextStyle(fontSize: 18, color: Colors.grey),
+            style: TextStyle(
+              fontSize: 18,
+              color: AppColors.whiteTransparent08,
+              fontWeight: FontWeight.w600,
+            ),
           ),
         ],
       ),
@@ -156,69 +97,247 @@ class _HomeState extends State<Home> {
   }
 
   Widget _buildPdfViewer() {
-    return PdfViewer.file(
-      pdfPath!,
-      controller: _pdfViewerController,
-      params: PdfViewerParams(
-        enableTextSelection: true,
-        onViewerReady: _onViewerReady,
-        onPageChanged: _onPageChanged,
-        onTextSelectionChange: _onTextSelectionChange,
+    return NotificationListener<ScrollNotification>(
+      onNotification: (notification) {
+        if (notification is ScrollUpdateNotification) {
+          _viewModel.handleScroll(notification.metrics.pixels);
+        } else if (notification is ScrollEndNotification) {
+          Future.delayed(
+            const Duration(milliseconds: 1000),
+            _viewModel.showAppBar,
+          );
+        }
+        return false;
+      },
+      child: PdfViewer.file(
+        _viewModel.pdfPath!,
+        controller: _viewModel.pdfViewerController,
+        params: PdfViewerParams(
+          enableTextSelection: true,
+          onViewerReady: _viewModel.onViewerReady,
+          onPageChanged: _viewModel.onPageChanged,
+          onTextSelectionChange: _viewModel.onTextSelectionChange,
+        ),
       ),
     );
   }
 
   Widget _buildPageIndicator() {
-    return Positioned(
-      bottom: 20,
-      left: 0,
-      right: 0,
-      child: Center(
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          decoration: BoxDecoration(
-            color: Colors.black.withValues(alpha: 0.8),
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: Text(
-            '$currentPage / $totalPages',
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 14,
-              fontWeight: FontWeight.w500,
+    return AnimatedBuilder(
+      animation: _viewModel.appBarAnimation,
+      builder: (context, child) {
+        return Positioned(
+          bottom: 20,
+          left: 0,
+          right: 0,
+          child: Center(
+            child: GestureDetector(
+              onTap: _viewModel.pdfDocument != null ? _jumpToPage : null,
+              child: UIHelpers.buildGlassmorphicContainer(
+                backgroundColor: AppColors.blackTransparent02,
+                borderRadius: 20,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        '${_viewModel.currentPage} / ${_viewModel.totalPages}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      const Icon(Icons.edit, color: Colors.white, size: 16),
+                    ],
+                  ),
+                ),
+              ),
             ),
           ),
-        ),
+        );
+      },
+    );
+  }
+
+  Widget _buildScrollHandle() {
+    return Positioned(
+      right: 8,
+      top: 0,
+      bottom: 0,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final scrollAreaHeight =
+              constraints.maxHeight -
+              AppConstants.topMargin -
+              AppConstants.bottomMargin;
+          final scrollableHeight = scrollAreaHeight - AppConstants.handleHeight;
+
+          final progress =
+              _viewModel.totalPages > 1
+                  ? (_viewModel.currentPage - 1) / (_viewModel.totalPages - 1)
+                  : 0.0;
+          final handleTop =
+              AppConstants.topMargin + (progress * scrollableHeight);
+
+          return GestureDetector(
+            onVerticalDragUpdate:
+                (details) => _viewModel.onScrollHandleDrag(
+                  details,
+                  constraints.maxHeight,
+                  context,
+                ),
+            child: SizedBox(
+              width: AppConstants.handleWidth,
+              height: constraints.maxHeight,
+              child: Stack(
+                alignment: Alignment.topRight,
+                children: [
+                  // Track
+                  Positioned(
+                    right:
+                        (AppConstants.handleWidth - AppConstants.trackWidth) /
+                        2,
+                    top: AppConstants.topMargin,
+                    bottom: AppConstants.bottomMargin,
+                    child: UIHelpers.buildGlassmorphicContainer(
+                      backgroundColor: AppColors.blackTransparent01,
+                      borderRadius: AppConstants.trackWidth / 2,
+                      child: const SizedBox(width: AppConstants.trackWidth),
+                    ),
+                  ),
+                  // Handle
+                  Positioned(
+                    top: handleTop,
+                    child: UIHelpers.buildGlassmorphicContainer(
+                      backgroundColor: AppColors.blackTransparent02,
+                      borderRadius: AppConstants.handleWidth / 2,
+                      child: const SizedBox(
+                        width: AppConstants.handleWidth,
+                        height: AppConstants.handleHeight,
+                        child: Center(
+                          child: Icon(
+                            Icons.drag_handle,
+                            color: Colors.white,
+                            size: 16,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
       ),
+    );
+  }
+
+  Widget _buildAnimatedAppBar(double appBarHeight) {
+    return AnimatedBuilder(
+      animation: _viewModel.appBarAnimation,
+      builder: (context, child) {
+        return Positioned(
+          top: _viewModel.appBarAnimation.value * appBarHeight,
+          left: 0,
+          right: 0,
+          child: UIHelpers.buildGlassmorphicContainer(
+            borderRadius: 0,
+            backgroundColor: AppColors.blackTransparent02,
+            child: Container(
+              height: appBarHeight,
+              decoration: const BoxDecoration(
+                border: Border(
+                  bottom: BorderSide(color: AppColors.whiteTransparent02),
+                ),
+              ),
+              child: SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          _viewModel.pdfName ?? 'PDF Viewer',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 18,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      ..._buildAppBarActions(),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 
   List<Widget> _buildAppBarActions() {
     return [
-      if (selectedText.isNotEmpty) ...[
-        IconButton(icon: const Icon(Icons.copy), onPressed: _copySelectedText),
+      if (_viewModel.selectedText.isNotEmpty) ...[
         IconButton(
-          icon: const Icon(Icons.summarize),
-          onPressed: () => _showSummaryDialog(selectedText),
+          onPressed: () {
+            _uiService.copyToClipboard(context, _viewModel.selectedText);
+            _viewModel.onTextSelectionChange(null); // Clear selection
+            _viewModel.showAppBar();
+          },
+          tooltip: 'Copy text',
+          icon: const Icon(Icons.copy, color: Colors.white, size: 24),
+        ),
+        IconButton(
+          onPressed:
+              () => _uiService.showSummaryScreen(
+                context,
+                _viewModel.selectedText,
+              ),
+          tooltip: 'Summarize',
+          icon: const Icon(Icons.summarize, color: Colors.white, size: 24),
         ),
       ],
-      IconButton(icon: const Icon(Icons.file_open), onPressed: _pickPDF),
+      if (_viewModel.pdfDocument != null)
+        IconButton(
+          onPressed: _jumpToPage,
+          tooltip: 'Go to page',
+          icon: const Icon(Icons.numbers, color: Colors.white, size: 24),
+        ),
+      IconButton(
+        onPressed: () => _viewModel.pickPdf(_showErrorSnackBar),
+        tooltip: 'Open PDF',
+        icon: const Icon(Icons.file_open, color: Colors.white, size: 24),
+      ),
     ];
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('PDF Viewer'),
-        actions: _buildAppBarActions(),
-      ),
-      body: Stack(
-        children: [
-          pdfDocument == null ? _buildEmptyState() : _buildPdfViewer(),
-          if (pdfDocument != null) _buildPageIndicator(),
-        ],
-      ),
+  // UI Action Handlers
+
+  Future<void> _jumpToPage() async {
+    _viewModel.showAppBar();
+    // The context is captured before the 'await'
+    final currentContext = context;
+    final pageNumber = await _uiService.showPageJumpDialog(
+      currentContext,
+      _viewModel.totalPages,
     );
+
+    if (!mounted) return;
+
+    if (pageNumber != null) {
+      await _viewModel.goToPage(pageNumber, _showErrorSnackBar);
+      if (!mounted) return;
+      FocusScope.of(context).unfocus();
+    }
   }
 }

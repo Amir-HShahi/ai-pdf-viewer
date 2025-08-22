@@ -1,4 +1,4 @@
-import 'package:ai_pdf_viewer/config/theme_data_customized.dart';
+import 'package:ai_pdf_viewer/utils/theme_data_customized.dart';
 import 'package:ai_pdf_viewer/services/env_handler.dart';
 import 'package:ai_pdf_viewer/view/home.dart';
 import 'package:flutter/material.dart';
