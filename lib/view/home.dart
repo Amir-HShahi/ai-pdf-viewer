@@ -179,19 +179,25 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
           final scrollableHeight = scrollAreaHeight - AppConstants.handleHeight;
 
           final progress =
-              _viewModel.totalPages > 1
-                  ? (_viewModel.currentPage - 1) / (_viewModel.totalPages - 1)
-                  : 0.0;
+              _viewModel.isDraggingScrollHandle
+                  ? _viewModel.scrollHandlePosition
+                  : (_viewModel.totalPages > 1
+                      ? (_viewModel.currentPage - 1) /
+                          (_viewModel.totalPages - 1)
+                      : 0.0);
+
           final handleTop =
               AppConstants.topMargin + (progress * scrollableHeight);
 
           return GestureDetector(
+            onVerticalDragStart: _viewModel.onScrollHandleDragStart,
             onVerticalDragUpdate:
                 (details) => _viewModel.onScrollHandleDrag(
                   details,
                   constraints.maxHeight,
                   context,
                 ),
+            onVerticalDragEnd: _viewModel.onScrollHandleDragEnd,
             child: SizedBox(
               width: AppConstants.handleWidth,
               height: constraints.maxHeight,
@@ -211,16 +217,37 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
                       child: const SizedBox(width: AppConstants.trackWidth),
                     ),
                   ),
-                  // Handle
-                  Positioned(
+                  // Handle with smooth animation
+                  AnimatedPositioned(
+                    duration:
+                        _viewModel.isDraggingScrollHandle
+                            ? Duration.zero
+                            : const Duration(milliseconds: 200),
+                    curve: Curves.easeOutCubic,
                     top: handleTop,
                     child: UIHelpers.buildGlassmorphicContainer(
-                      backgroundColor: AppColors.blackTransparent02,
+                      backgroundColor:
+                          _viewModel.isDraggingScrollHandle
+                              ? AppColors
+                                  .blackTransparent03 // Slightly more opaque when dragging
+                              : AppColors.blackTransparent02,
                       borderRadius: AppConstants.handleWidth / 2,
-                      child: const SizedBox(
+                      child: Container(
                         width: AppConstants.handleWidth,
                         height: AppConstants.handleHeight,
-                        child: Center(
+                        decoration:
+                            _viewModel.isDraggingScrollHandle
+                                ? BoxDecoration(
+                                  borderRadius: BorderRadius.circular(
+                                    AppConstants.handleWidth / 2,
+                                  ),
+                                  border: Border.all(
+                                    color: AppColors.whiteTransparent02,
+                                    width: 1,
+                                  ),
+                                )
+                                : null,
+                        child: const Center(
                           child: Icon(
                             Icons.drag_handle,
                             color: Colors.white,
@@ -230,6 +257,31 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
                       ),
                     ),
                   ),
+                  // Optional: Add page indicator next to handle when dragging
+                  if (_viewModel.isDraggingScrollHandle)
+                    AnimatedPositioned(
+                      duration: const Duration(milliseconds: 100),
+                      top: handleTop - 4,
+                      right: AppConstants.handleWidth + 8,
+                      child: UIHelpers.buildGlassmorphicContainer(
+                        backgroundColor: AppColors.blackTransparent02,
+                        borderRadius: 12,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          child: Text(
+                            '${(1 + (_viewModel.scrollHandlePosition * (_viewModel.totalPages - 1))).round()}',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ),

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../utils/app_colors.dart';
 import '../utils/ui_helpers.dart';
 import '../view/page_jump_dialog.dart';
 import '../view/summary.dart';
@@ -19,22 +18,21 @@ class UiInteractionService {
   }
 
   Future<int?> showPageJumpDialog(BuildContext context, int totalPages) async {
-    final pageController = TextEditingController();
-    final result = await showDialog<String>(
-      context: context,
-      barrierColor: AppColors.blackTransparent03,
-      builder:
-          (context) => PageJumpDialog(
-        totalPages: totalPages,
-        controller: pageController,
-      ),
-    );
+    if (!context.mounted) return null;
 
-    pageController.dispose();
+    try {
+      final result = await showDialog<int>(
+        context: context,
+        barrierDismissible: true,
+        builder: (BuildContext dialogContext) {
+          return PageJumpDialog(totalPages: totalPages);
+        },
+      );
 
-    if (result != null && result.isNotEmpty) {
-      return int.tryParse(result);
+      return result;
+    } catch (e) {
+      debugPrint('Error showing page jump dialog: $e');
+      return null;
     }
-    return null;
   }
 }

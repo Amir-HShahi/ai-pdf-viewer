@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:pdfrx/pdfrx.dart';
 
@@ -27,6 +29,15 @@ class HomeViewModel with ChangeNotifier {
   int? _targetPage;
   bool _isAppBarVisible = true;
   double _lastScrollOffset = 0;
+  bool _isNavigating = false;
+
+  bool _isDraggingScrollHandle = false;
+  double _scrollHandlePosition = 0.0; // Tracks visual position (0.0 to 1.0)
+  Timer? _scrollDebounceTimer;
+  int _lastDragTargetPage = -1;
+
+  bool get isDraggingScrollHandle => _isDraggingScrollHandle;
+  double get scrollHandlePosition => _scrollHandlePosition;
 
   // Getters for UI
   String get selectedText => _selectedText;
@@ -41,8 +52,8 @@ class HomeViewModel with ChangeNotifier {
     required this.vsync,
     required PdfFileService pdfFileService,
     required PdfStatePersistenceService pdfStatePersistenceService,
-  })  : _pdfFileService = pdfFileService,
-        _pdfStatePersistenceService = pdfStatePersistenceService {
+  }) : _pdfFileService = pdfFileService,
+       _pdfStatePersistenceService = pdfStatePersistenceService {
     _initializeControllers();
   }
 
@@ -67,9 +78,132 @@ class HomeViewModel with ChangeNotifier {
 
   @override
   void dispose() {
+    _scrollDebounceTimer?.cancel();
     _pdfDocument?.dispose();
     appBarAnimationController.dispose();
     super.dispose();
+  }
+
+  void onScrollHandleDrag(
+    DragUpdateDetails details,
+    double scrollAreaHeight,
+    BuildContext context,
+  ) {
+    if (_pdfDocument == null || _totalPages <= 1) return;
+
+    final RenderBox? renderBox = context.findRenderObject() as RenderBox?;
+    if (renderBox == null) return;
+
+    final localPosition = renderBox.globalToLocal(details.globalPosition);
+
+    final scrollableHeight =
+        scrollAreaHeight -
+        AppConstants.topMargin -
+        AppConstants.bottomMargin -
+        AppConstants.handleHeight;
+
+    final relativeY = (localPosition.dy -
+            AppConstants.topMargin -
+            (AppConstants.handleHeight / 2))
+        .clamp(0.0, scrollableHeight);
+
+    // Update visual position immediately for smooth animation
+    final newProgress = relativeY / scrollableHeight;
+    _scrollHandlePosition = newProgress.clamp(0.0, 1.0);
+    _isDraggingScrollHandle = true;
+
+    // Calculate target page
+    final targetPage = (1 + (newProgress * (_totalPages - 1))).round().clamp(
+      1,
+      _totalPages,
+    );
+
+    // Only navigate if target page changed and debounce rapid changes
+    if (targetPage != _lastDragTargetPage) {
+      _lastDragTargetPage = targetPage;
+
+      // Cancel previous timer
+      _scrollDebounceTimer?.cancel();
+
+      // Set a short debounce to prevent too many navigation calls
+      _scrollDebounceTimer = Timer(const Duration(milliseconds: 50), () {
+        if (_isDraggingScrollHandle && targetPage != _currentPage) {
+          _navigateToPageSmooth(targetPage);
+        }
+      });
+    }
+
+    notifyListeners();
+  }
+
+  void onScrollHandleDragStart(DragStartDetails details) {
+    _isDraggingScrollHandle = true;
+    _scrollDebounceTimer?.cancel();
+    notifyListeners();
+  }
+
+  void onScrollHandleDragEnd(DragEndDetails details) {
+    _isDraggingScrollHandle = false;
+    _scrollDebounceTimer?.cancel();
+
+    // Snap to the current page position
+    if (_totalPages > 1) {
+      _scrollHandlePosition = (_currentPage - 1) / (_totalPages - 1);
+    } else {
+      _scrollHandlePosition = 0.0;
+    }
+
+    _lastDragTargetPage = -1;
+    notifyListeners();
+  }
+
+  Future<void> _navigateToPageSmooth(int targetPage) async {
+    if (_isNavigating || targetPage == _currentPage) return;
+
+    _isNavigating = true;
+
+    try {
+      await pdfViewerController.goToPage(pageNumber: targetPage);
+      // Don't update _currentPage here - let onPageChanged handle it
+    } catch (e) {
+      debugPrint('Error navigating to page $targetPage: $e');
+    } finally {
+      _isNavigating = false;
+    }
+  }
+
+  // Update the onPageChanged method to sync scroll handle position
+  void onPageChanged(int? pageNumber) async {
+    if (pageNumber != null && pageNumber != _currentPage && !_isNavigating) {
+      _currentPage = pageNumber;
+
+      // Update scroll handle position if not dragging
+      if (!_isDraggingScrollHandle) {
+        if (_totalPages > 1) {
+          _scrollHandlePosition = (_currentPage - 1) / (_totalPages - 1);
+        } else {
+          _scrollHandlePosition = 0.0;
+        }
+      }
+
+      showAppBar();
+      Future.delayed(const Duration(milliseconds: 2000), () {
+        hideAppBar();
+      });
+
+      if (!_isLoadingLastPdf && _pdfPath != null) {
+        try {
+          await _pdfStatePersistenceService.savePdfState(
+            _pdfPath!,
+            _currentPage,
+          );
+        } catch (e) {
+          debugPrint('Error saving PDF state: $e');
+        }
+      }
+
+      notifyListeners();
+    }
   }
 
   // App Bar Animation Logic
@@ -157,66 +291,104 @@ class HomeViewModel with ChangeNotifier {
     _targetPage = null;
   }
 
-  // Page Navigation Logic
   Future<void> goToPage(int pageNumber, Function(String) onError) async {
     if (pageNumber < 1 || pageNumber > _totalPages) {
       onError('Page number must be between 1 and $_totalPages');
       return;
     }
 
+    if (_isNavigating) {
+      debugPrint('Navigation already in progress, skipping...');
+      return;
+    }
+
+    _isNavigating = true;
+
     try {
+      // Use a more reliable method to navigate to the page
       await pdfViewerController.goToPage(pageNumber: pageNumber);
-    } catch (e) {
-      onError('Error going to page: $e');
-    }
-  }
 
-  // Scroll Handle Logic
-  void onScrollHandleDrag(
-      DragUpdateDetails details,
-      double scrollAreaHeight,
-      BuildContext context,
-      ) {
-    if (_pdfDocument == null || _totalPages <= 1) return;
+      // Add a small delay to ensure the navigation completes
+      await Future.delayed(const Duration(milliseconds: 200));
 
-    final RenderBox? renderBox = context.findRenderObject() as RenderBox?;
-    if (renderBox == null) return;
-    final localPosition = renderBox.globalToLocal(details.globalPosition);
+      // Force update the current page if it hasn't been updated by onPageChanged
+      if (_currentPage != pageNumber) {
+        _currentPage = pageNumber;
 
-    final scrollableHeight = scrollAreaHeight -
-        AppConstants.topMargin -
-        AppConstants.bottomMargin -
-        AppConstants.handleHeight;
-    final relativeY = (localPosition.dy -
-        AppConstants.topMargin -
-        (AppConstants.handleHeight / 2))
-        .clamp(0.0, scrollableHeight);
+        // Save the page state immediately
+        if (_pdfPath != null) {
+          await _pdfStatePersistenceService.savePdfState(_pdfPath!, pageNumber);
+        }
 
-    final progress = relativeY / scrollableHeight;
-    final targetPage = (1 + (progress * (_totalPages - 1))).round().clamp(
-      1,
-      _totalPages,
-    );
-
-    if (targetPage != _currentPage) {
-      pdfViewerController.goToPage(pageNumber: targetPage).catchError((e) {
-        debugPrint('Error navigating to page $targetPage: $e');
-      });
-    }
-  }
-
-  // PDF Viewer Event Handlers
-  void onPageChanged(int? pageNumber) async {
-    if (pageNumber != null) {
-      _currentPage = pageNumber;
-      notifyListeners();
-
-      showAppBar();
-      Future.delayed(const Duration(milliseconds: 2000), () => hideAppBar());
-
-      if (!_isLoadingLastPdf && _pdfPath != null) {
-        await _pdfStatePersistenceService.savePdfState(_pdfPath!, _currentPage);
+        // Notify listeners after state is saved
+        notifyListeners();
       }
+    } catch (e) {
+      debugPrint('Error going to page $pageNumber: $e');
+      onError('Error going to page: $e');
+    } finally {
+      _isNavigating = false;
+    }
+  }
+
+  Future<void> goToPagePrecise(int pageNumber, Function(String) onError) async {
+    if (pageNumber < 1 || pageNumber > _totalPages) {
+      onError('Page number must be between 1 and $_totalPages');
+      return;
+    }
+
+    if (_isNavigating) return;
+    _isNavigating = true;
+
+    try {
+      // Try multiple approaches for better reliability
+      bool navigationSuccessful = false;
+
+      //  Direct navigation
+      try {
+        await pdfViewerController.goToPage(pageNumber: pageNumber);
+        await Future.delayed(const Duration(milliseconds: 200));
+
+        if (_currentPage == pageNumber) {
+          navigationSuccessful = true;
+        }
+      } catch (e) {
+        debugPrint('Method 1 failed: $e');
+      }
+
+      //  If direct navigation didn't work, try with retry
+      if (!navigationSuccessful) {
+        for (int attempt = 0; attempt < 3 && !navigationSuccessful; attempt++) {
+          try {
+            await pdfViewerController.goToPage(pageNumber: pageNumber);
+            await Future.delayed(Duration(milliseconds: 300 + (attempt * 100)));
+
+            if (_currentPage == pageNumber) {
+              navigationSuccessful = true;
+              break;
+            }
+          } catch (e) {
+            debugPrint('Retry attempt $attempt failed: $e');
+          }
+        }
+      }
+
+      // Force update if navigation was successful but page wasn't updated
+      if (!navigationSuccessful) {
+        // Last resort: force update the page number
+        _currentPage = pageNumber;
+        notifyListeners();
+
+        // Save the state
+        if (_pdfPath != null) {
+          await _pdfStatePersistenceService.savePdfState(_pdfPath!, pageNumber);
+        }
+      }
+    } catch (e) {
+      debugPrint('Error in precise navigation to page $pageNumber: $e');
+      onError('Error going to page: $e');
+    } finally {
+      _isNavigating = false;
     }
   }
 
@@ -243,6 +415,14 @@ class HomeViewModel with ChangeNotifier {
     Future.delayed(const Duration(milliseconds: 500), () async {
       try {
         await controller.goToPage(pageNumber: _targetPage!);
+        // Wait a bit longer for the navigation to complete
+        await Future.delayed(const Duration(milliseconds: 300));
+
+        // Verify the navigation was successful
+        if (_currentPage != _targetPage!) {
+          // Try once more if it didn't work
+          await controller.goToPage(pageNumber: _targetPage!);
+        }
       } catch (e) {
         debugPrint('Error navigating to saved page: $e');
       }
