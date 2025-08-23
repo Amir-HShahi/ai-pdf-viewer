@@ -23,17 +23,23 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
-          java-version: '17'
+          java-version: '18.x'  # Updated to match working example
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.27.0'  # Updated to latest stable
-          channel: 'stable'
+          channel: 'stable'  # Use stable channel instead of specific version
           cache: true
+
+      - name: Accept Android SDK licenses
+        run: |
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
 
       - name: Get dependencies
         run: flutter pub get
+
+      - name: Check for lints
+        run: flutter analyze
 
       - name: Run tests
         run: flutter test
@@ -59,32 +65,44 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '18.x'
+
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.27.0'  # Updated to latest stable
           channel: 'stable'
           cache: true
+
+      - name: Accept Android SDK licenses
+        run: |
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
 
       - name: Get dependencies
         run: flutter pub get
 
+      - name: Check for lints
+        run: flutter analyze
+
       - name: Run tests
         run: flutter test
 
-      - name: Build iOS (without signing)
+      - name: Build iOS IPA
+        run: flutter build ipa --no-codesign
+
+      - name: Compress iOS build
         run: |
-          flutter build ios --release --no-codesign
-          cd build/ios/iphoneos
-          mkdir -p Payload
-          cp -r Runner.app Payload/
-          zip -r app-release.ipa Payload/
+          cd build
+          tar -czf ios_build.tar.gz ios
 
       - name: Upload iOS artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ios-builds
-          path: build/ios/iphoneos/app-release.ipa
+          path: build/ios_build.tar.gz
 
   # Build for Windows
   build-windows:
@@ -96,7 +114,6 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.27.0'  # Updated to latest stable
           channel: 'stable'
           cache: true
 
@@ -105,6 +122,9 @@ jobs:
 
       - name: Get dependencies
         run: flutter pub get
+
+      - name: Check for lints
+        run: flutter analyze
 
       - name: Run tests
         run: flutter test
@@ -138,7 +158,6 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.27.0'  # Updated to latest stable
           channel: 'stable'
           cache: true
 
@@ -147,6 +166,9 @@ jobs:
 
       - name: Get dependencies
         run: flutter pub get
+
+      - name: Check for lints
+        run: flutter analyze
 
       - name: Run tests
         run: flutter test
@@ -203,7 +225,7 @@ jobs:
           cp ./artifacts/android-builds/app-release.aab ./release-files/ai_pdf_viewer-${{ steps.version.outputs.version }}-android.aab
           
           # iOS files
-          cp ./artifacts/ios-builds/app-release.ipa ./release-files/ai_pdf_viewer-${{ steps.version.outputs.version }}-ios.ipa
+          cp ./artifacts/ios-builds/ios_build.tar.gz ./release-files/ai_pdf_viewer-${{ steps.version.outputs.version }}-ios.tar.gz
           
           # Windows files
           cp ./artifacts/windows-builds/windows-release.zip ./release-files/ai_pdf_viewer-${{ steps.version.outputs.version }}-windows.zip
@@ -223,7 +245,7 @@ jobs:
           - **AAB**: `ai_pdf_viewer-${{ steps.version.outputs.version }}-android.aab` - For Google Play Store
           
           ### iOS
-          - **IPA**: `ai_pdf_viewer-${{ steps.version.outputs.version }}-ios.ipa` - iOS installation file (requires proper code signing for device installation)
+          - **TAR.GZ**: `ai_pdf_viewer-${{ steps.version.outputs.version }}-ios.tar.gz` - iOS build archive (requires proper code signing for device installation)
           
           ### Windows
           - **ZIP**: `ai_pdf_viewer-${{ steps.version.outputs.version }}-windows.zip` - Extract and run the executable
@@ -248,10 +270,11 @@ jobs:
           3. Run the application: `./ai_pdf_viewer`
           
           ### iOS
-          Note: The IPA file is not code-signed. For actual iOS deployment, you'll need to:
-          1. Have an Apple Developer account
-          2. Code sign the app properly
-          3. Distribute through App Store or TestFlight
+          Note: The iOS build is not code-signed. For actual iOS deployment, you'll need to:
+          1. Extract the tar.gz file
+          2. Have an Apple Developer account
+          3. Code sign the app properly
+          4. Distribute through App Store or TestFlight
           
           ---
           
