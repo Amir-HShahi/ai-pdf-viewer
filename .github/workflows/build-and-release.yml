@@ -95,7 +95,8 @@ jobs:
         run: flutter analyze
 
       - name: Build iOS IPA
-        run: flutter build ipa --no-codesign
+        run: |
+          flutter build ios --release --no-codesign
 
       - name: Compress iOS build
         run: |
