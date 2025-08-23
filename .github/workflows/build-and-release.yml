@@ -23,12 +23,12 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
-          java-version: '18.x'  # Updated to match working example
+          java-version: '18.x'
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          channel: 'stable'  # Use stable channel instead of specific version
+          channel: 'stable'
           cache: true
 
       - name: Accept Android SDK licenses
@@ -93,7 +93,8 @@ jobs:
       - name: Create Windows ZIP
         run: |
           cd build\windows\x64\runner\Release
-          powershell Compress-Archive -Path * -DestinationPath ..\..\..\..\windows-release.zip
+          powershell Compress-Archive -Path * -DestinationPath windows-release.zip
+          move windows-release.zip ..\..\..\..\
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
@@ -139,13 +140,19 @@ jobs:
       - name: Create Linux tar.gz
         run: |
           cd build/linux/x64/release/bundle
-          tar -czf ../../../../../linux-release.tar.gz *
+          tar -czf linux-release.tar.gz *
+          mv linux-release.tar.gz ../../../../../
+
+      - name: Verify Linux artifact
+        run: |
+          ls -la build/
+          ls -la linux-release.tar.gz
 
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
         with:
           name: linux-builds
-          path: build/linux-release.tar.gz
+          path: linux-release.tar.gz
 
   # Create Release
   create-release:
@@ -174,7 +181,40 @@ jobs:
           path: ./artifacts
 
       - name: Display structure of downloaded files
-        run: ls -la ./artifacts/**/*
+        run: |
+          echo "Artifact structure:"
+          find ./artifacts -type f -exec ls -la {} \;
+
+      - name: Verify all required files exist
+        run: |
+          echo "Checking for required files..."
+          
+          # Check Android files
+          if [[ ! -f "./artifacts/android-builds/app-release.apk" ]]; then
+            echo "ERROR: Android APK not found"
+            exit 1
+          fi
+          
+          if [[ ! -f "./artifacts/android-builds/app-release.aab" ]]; then
+            echo "ERROR: Android AAB not found"
+            exit 1
+          fi
+          
+          # Check Windows files
+          if [[ ! -f "./artifacts/windows-builds/windows-release.zip" ]]; then
+            echo "ERROR: Windows ZIP not found"
+            exit 1
+          fi
+          
+          # Check Linux files
+          if [[ ! -f "./artifacts/linux-builds/linux-release.tar.gz" ]]; then
+            echo "ERROR: Linux TAR.GZ not found"
+            echo "Available Linux files:"
+            ls -la ./artifacts/linux-builds/ || echo "Linux builds directory not found"
+            exit 1
+          fi
+          
+          echo "All required files found!"
 
       - name: Rename files for release
         run: |
