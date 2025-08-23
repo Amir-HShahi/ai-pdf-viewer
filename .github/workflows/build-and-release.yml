@@ -158,6 +158,7 @@ jobs:
   create-release:
     needs: [build-android, build-windows, build-linux]
     runs-on: ubuntu-latest
+    if: ${{ always() && needs.build-android.result == 'success' && needs.build-windows.result == 'success' && needs.build-linux.result == 'success' }}
     permissions:
       contents: write
     steps:
@@ -189,29 +190,54 @@ jobs:
         run: |
           echo "Checking for required files..."
           
-          # Check Android files
-          if [[ ! -f "./artifacts/android-builds/app-release.apk" ]]; then
-            echo "ERROR: Android APK not found"
+          # First, let's see what we actually have
+          echo "=== Available artifacts ==="
+          find ./artifacts -type f -name "*.apk" -o -name "*.aab" -o -name "*.zip" -o -name "*.tar.gz" | sort
+          
+          echo ""
+          echo "=== Detailed artifact structure ==="
+          find ./artifacts -type f -exec ls -la {} \;
+          
+          # Check Android files with more flexible paths
+          APK_FILE=$(find ./artifacts -name "*.apk" -type f | head -1)
+          AAB_FILE=$(find ./artifacts -name "*.aab" -type f | head -1)
+          
+          if [[ -z "$APK_FILE" ]]; then
+            echo "ERROR: No Android APK found anywhere in artifacts"
+            echo "Android build artifacts:"
+            ls -la ./artifacts/android-builds/ 2>/dev/null || echo "No android-builds directory found"
             exit 1
+          else
+            echo "Found APK: $APK_FILE"
           fi
           
-          if [[ ! -f "./artifacts/android-builds/app-release.aab" ]]; then
-            echo "ERROR: Android AAB not found"
+          if [[ -z "$AAB_FILE" ]]; then
+            echo "ERROR: No Android AAB found anywhere in artifacts"
             exit 1
+          else
+            echo "Found AAB: $AAB_FILE"
           fi
           
           # Check Windows files
-          if [[ ! -f "./artifacts/windows-builds/windows-release.zip" ]]; then
-            echo "ERROR: Windows ZIP not found"
+          ZIP_FILE=$(find ./artifacts -name "*.zip" -type f | head -1)
+          if [[ -z "$ZIP_FILE" ]]; then
+            echo "ERROR: No Windows ZIP found anywhere in artifacts"
+            echo "Windows build artifacts:"
+            ls -la ./artifacts/windows-builds/ 2>/dev/null || echo "No windows-builds directory found"
             exit 1
+          else
+            echo "Found ZIP: $ZIP_FILE"
           fi
           
           # Check Linux files
-          if [[ ! -f "./artifacts/linux-builds/linux-release.tar.gz" ]]; then
-            echo "ERROR: Linux TAR.GZ not found"
-            echo "Available Linux files:"
-            ls -la ./artifacts/linux-builds/ || echo "Linux builds directory not found"
+          TAR_FILE=$(find ./artifacts -name "*.tar.gz" -type f | head -1)
+          if [[ -z "$TAR_FILE" ]]; then
+            echo "ERROR: No Linux TAR.GZ found anywhere in artifacts"
+            echo "Linux build artifacts:"
+            ls -la ./artifacts/linux-builds/ 2>/dev/null || echo "No linux-builds directory found"
             exit 1
+          else
+            echo "Found TAR.GZ: $TAR_FILE"
           fi
           
           echo "All required files found!"
@@ -220,15 +246,20 @@ jobs:
         run: |
           mkdir -p ./release-files
           
-          # Android files
-          cp ./artifacts/android-builds/app-release.apk ./release-files/ai_pdf_viewer-${{ steps.version.outputs.version }}-android.apk
-          cp ./artifacts/android-builds/app-release.aab ./release-files/ai_pdf_viewer-${{ steps.version.outputs.version }}-android.aab
+          # Find and copy Android files
+          APK_FILE=$(find ./artifacts -name "*.apk" -type f | head -1)
+          AAB_FILE=$(find ./artifacts -name "*.aab" -type f | head -1)
+          ZIP_FILE=$(find ./artifacts -name "*.zip" -type f | head -1)
+          TAR_FILE=$(find ./artifacts -name "*.tar.gz" -type f | head -1)
           
-          # Windows files
-          cp ./artifacts/windows-builds/windows-release.zip ./release-files/ai_pdf_viewer-${{ steps.version.outputs.version }}-windows.zip
+          # Copy with dynamic paths
+          cp "$APK_FILE" ./release-files/ai_pdf_viewer-${{ steps.version.outputs.version }}-android.apk
+          cp "$AAB_FILE" ./release-files/ai_pdf_viewer-${{ steps.version.outputs.version }}-android.aab
+          cp "$ZIP_FILE" ./release-files/ai_pdf_viewer-${{ steps.version.outputs.version }}-windows.zip
+          cp "$TAR_FILE" ./release-files/ai_pdf_viewer-${{ steps.version.outputs.version }}-linux.tar.gz
           
-          # Linux files
-          cp ./artifacts/linux-builds/linux-release.tar.gz ./release-files/ai_pdf_viewer-${{ steps.version.outputs.version }}-linux.tar.gz
+          echo "Files prepared for release:"
+          ls -la ./release-files/
 
       - name: Create Release Notes
         run: |
