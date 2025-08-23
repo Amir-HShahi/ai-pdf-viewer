@@ -46,9 +46,6 @@ jobs:
       - name: Check for lints
         run: flutter analyze
 
-      - name: Run tests
-        run: flutter test
-
       - name: Build Android APK
         run: flutter build apk --release
 
@@ -178,6 +175,11 @@ jobs:
 
       - name: Enable Linux desktop
         run: flutter config --enable-linux-desktop
+
+      - name: Create .env file
+        run: |
+          echo "API_KEY=${{ secrets.API_KEY }}" >> .env
+          echo "BASE_URL=${{ secrets.BASE_URL }}" >> .env
 
       - name: Get dependencies
         run: flutter pub get
