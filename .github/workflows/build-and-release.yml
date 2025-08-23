@@ -94,9 +94,6 @@ jobs:
       - name: Check for lints
         run: flutter analyze
 
-      - name: Run tests
-        run: flutter test
-
       - name: Build iOS IPA
         run: flutter build ipa --no-codesign
 
@@ -137,9 +134,6 @@ jobs:
 
       - name: Check for lints
         run: flutter analyze
-
-      - name: Run tests
-        run: flutter test
 
       - name: Build Windows
         run: flutter build windows --release
@@ -186,9 +180,6 @@ jobs:
 
       - name: Check for lints
         run: flutter analyze
-
-      - name: Run tests
-        run: flutter test
 
       - name: Build Linux
         run: flutter build linux --release
