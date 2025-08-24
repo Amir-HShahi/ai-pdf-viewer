@@ -47,18 +47,13 @@ jobs:
         run: flutter analyze
 
       - name: Build Android APK
-        run: flutter build apk --release
-
-      - name: Build Android App Bundle
-        run: flutter build appbundle --release
+        run: flutter build apk --split-per-abi --release
 
       - name: Upload Android artifacts
         uses: actions/upload-artifact@v4
         with:
           name: android-builds
-          path: |
-            build/app/outputs/flutter-apk/app-release.apk
-            build/app/outputs/bundle/release/app-release.aab
+          path: build/app/outputs/flutter-apk/*.apk
 
   # Build for Windows
   build-windows:
@@ -192,7 +187,7 @@ jobs:
           
           # First, let's see what we actually have
           echo "=== Available artifacts ==="
-          find ./artifacts -type f -name "*.apk" -o -name "*.aab" -o -name "*.zip" -o -name "*.tar.gz" | sort
+          find ./artifacts -type f -name "*.apk" -o -name "*.zip" -o -name "*.tar.gz" | sort
           
           echo ""
           echo "=== Detailed artifact structure ==="
@@ -200,7 +195,6 @@ jobs:
           
           # Check Android files with more flexible paths
           APK_FILE=$(find ./artifacts -name "*.apk" -type f | head -1)
-          AAB_FILE=$(find ./artifacts -name "*.aab" -type f | head -1)
           
           if [[ -z "$APK_FILE" ]]; then
             echo "ERROR: No Android APK found anywhere in artifacts"
@@ -208,14 +202,7 @@ jobs:
             ls -la ./artifacts/android-builds/ 2>/dev/null || echo "No android-builds directory found"
             exit 1
           else
-            echo "Found APK: $APK_FILE"
-          fi
-          
-          if [[ -z "$AAB_FILE" ]]; then
-            echo "ERROR: No Android AAB found anywhere in artifacts"
-            exit 1
-          else
-            echo "Found AAB: $AAB_FILE"
+            echo "Found APK(s)."
           fi
           
           # Check Windows files
@@ -246,15 +233,14 @@ jobs:
         run: |
           mkdir -p ./release-files
           
-          # Find and copy Android files
-          APK_FILE=$(find ./artifacts -name "*.apk" -type f | head -1)
-          AAB_FILE=$(find ./artifacts -name "*.aab" -type f | head -1)
+          # Find asset paths
           ZIP_FILE=$(find ./artifacts -name "*.zip" -type f | head -1)
           TAR_FILE=$(find ./artifacts -name "*.tar.gz" -type f | head -1)
           
-          # Copy with dynamic paths
-          cp "$APK_FILE" ./release-files/ai_pdf_viewer-${{ steps.version.outputs.version }}-android.apk
-          cp "$AAB_FILE" ./release-files/ai_pdf_viewer-${{ steps.version.outputs.version }}-android.aab
+          # Copy all Android APKs from the artifact directory to the release directory
+          cp ./artifacts/android-builds/*.apk ./release-files/
+          
+          # Copy and rename other build assets
           cp "$ZIP_FILE" ./release-files/ai_pdf_viewer-${{ steps.version.outputs.version }}-windows.zip
           cp "$TAR_FILE" ./release-files/ai_pdf_viewer-${{ steps.version.outputs.version }}-linux.tar.gz
           
@@ -269,8 +255,7 @@ jobs:
           ## Downloads
           
           ### Android
-          - **APK**: `ai_pdf_viewer-${{ steps.version.outputs.version }}-android.apk` - Direct installation file
-          - **AAB**: `ai_pdf_viewer-${{ steps.version.outputs.version }}-android.aab` - For Google Play Store
+          - **APKs**: Multiple APKs are provided for different architectures. Download the one that matches your device (usually `arm64-v8a` for modern phones).
           
           ### Windows
           - **ZIP**: `ai_pdf_viewer-${{ steps.version.outputs.version }}-windows.zip` - Extract and run the executable
@@ -281,7 +266,7 @@ jobs:
           ## Installation Instructions
           
           ### Android
-          1. Download the APK file
+          1. Download the appropriate APK file for your device
           2. Enable "Install from unknown sources" in your device settings
           3. Install the APK file
           

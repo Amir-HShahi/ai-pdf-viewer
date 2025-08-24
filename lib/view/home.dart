@@ -51,6 +51,11 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
     UIHelpers.showSnackBar(context, message);
   }
 
+  // Add this method to toggle app bar visibility
+  void _toggleAppBarVisibility() {
+    _viewModel.toggleAppBar();
+  }
+
   @override
   Widget build(BuildContext context) {
     final appBarHeight = MediaQuery.of(context).padding.top + kToolbarHeight;
@@ -97,26 +102,27 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
   }
 
   Widget _buildPdfViewer() {
-    return NotificationListener<ScrollNotification>(
-      onNotification: (notification) {
-        if (notification is ScrollUpdateNotification) {
-          _viewModel.handleScroll(notification.metrics.pixels);
-        } else if (notification is ScrollEndNotification) {
-          Future.delayed(
-            const Duration(milliseconds: 1000),
-            _viewModel.showAppBar,
-          );
-        }
-        return false;
-      },
-      child: PdfViewer.file(
-        _viewModel.pdfPath!,
-        controller: _viewModel.pdfViewerController,
-        params: PdfViewerParams(
-          enableTextSelection: true,
-          onViewerReady: _viewModel.onViewerReady,
-          onPageChanged: _viewModel.onPageChanged,
-          onTextSelectionChange: _viewModel.onTextSelectionChange,
+    return GestureDetector(
+      // Add tap detection to toggle app bar
+      onTap: _toggleAppBarVisibility,
+      child: NotificationListener<ScrollNotification>(
+        onNotification: (notification) {
+          if (notification is ScrollUpdateNotification) {
+            _viewModel.handleScroll(notification.metrics.pixels);
+          }
+          // Remove the automatic show after scroll ends
+          // The app bar will now only toggle on tap or scroll hide
+          return false;
+        },
+        child: PdfViewer.file(
+          _viewModel.pdfPath!,
+          controller: _viewModel.pdfViewerController,
+          params: PdfViewerParams(
+            enableTextSelection: true,
+            onViewerReady: _viewModel.onViewerReady,
+            onPageChanged: _viewModel.onPageChanged,
+            onTextSelectionChange: _viewModel.onTextSelectionChange,
+          ),
         ),
       ),
     );
@@ -174,17 +180,17 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
         builder: (context, constraints) {
           final scrollAreaHeight =
               constraints.maxHeight -
-              AppConstants.topMargin -
-              AppConstants.bottomMargin;
+                  AppConstants.topMargin -
+                  AppConstants.bottomMargin;
           final scrollableHeight = scrollAreaHeight - AppConstants.handleHeight;
 
           final progress =
-              _viewModel.isDraggingScrollHandle
-                  ? _viewModel.scrollHandlePosition
-                  : (_viewModel.totalPages > 1
-                      ? (_viewModel.currentPage - 1) /
-                          (_viewModel.totalPages - 1)
-                      : 0.0);
+          _viewModel.isDraggingScrollHandle
+              ? _viewModel.scrollHandlePosition
+              : (_viewModel.totalPages > 1
+              ? (_viewModel.currentPage - 1) /
+              (_viewModel.totalPages - 1)
+              : 0.0);
 
           final handleTop =
               AppConstants.topMargin + (progress * scrollableHeight);
@@ -193,10 +199,10 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
             onVerticalDragStart: _viewModel.onScrollHandleDragStart,
             onVerticalDragUpdate:
                 (details) => _viewModel.onScrollHandleDrag(
-                  details,
-                  constraints.maxHeight,
-                  context,
-                ),
+              details,
+              constraints.maxHeight,
+              context,
+            ),
             onVerticalDragEnd: _viewModel.onScrollHandleDragEnd,
             child: SizedBox(
               width: AppConstants.handleWidth,
@@ -207,7 +213,7 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
                   // Track
                   Positioned(
                     right:
-                        (AppConstants.handleWidth - AppConstants.trackWidth) /
+                    (AppConstants.handleWidth - AppConstants.trackWidth) /
                         2,
                     top: AppConstants.topMargin,
                     bottom: AppConstants.bottomMargin,
@@ -220,33 +226,33 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
                   // Handle with smooth animation
                   AnimatedPositioned(
                     duration:
-                        _viewModel.isDraggingScrollHandle
-                            ? Duration.zero
-                            : const Duration(milliseconds: 200),
+                    _viewModel.isDraggingScrollHandle
+                        ? Duration.zero
+                        : const Duration(milliseconds: 200),
                     curve: Curves.easeOutCubic,
                     top: handleTop,
                     child: UIHelpers.buildGlassmorphicContainer(
                       backgroundColor:
-                          _viewModel.isDraggingScrollHandle
-                              ? AppColors
-                                  .blackTransparent03 // Slightly more opaque when dragging
-                              : AppColors.blackTransparent02,
+                      _viewModel.isDraggingScrollHandle
+                          ? AppColors
+                          .blackTransparent03 // Slightly more opaque when dragging
+                          : AppColors.blackTransparent02,
                       borderRadius: AppConstants.handleWidth / 2,
                       child: Container(
                         width: AppConstants.handleWidth,
                         height: AppConstants.handleHeight,
                         decoration:
-                            _viewModel.isDraggingScrollHandle
-                                ? BoxDecoration(
-                                  borderRadius: BorderRadius.circular(
-                                    AppConstants.handleWidth / 2,
-                                  ),
-                                  border: Border.all(
-                                    color: AppColors.whiteTransparent02,
-                                    width: 1,
-                                  ),
-                                )
-                                : null,
+                        _viewModel.isDraggingScrollHandle
+                            ? BoxDecoration(
+                          borderRadius: BorderRadius.circular(
+                            AppConstants.handleWidth / 2,
+                          ),
+                          border: Border.all(
+                            color: AppColors.whiteTransparent02,
+                            width: 1,
+                          ),
+                        )
+                            : null,
                         child: const Center(
                           child: Icon(
                             Icons.drag_handle,
@@ -352,19 +358,18 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
         IconButton(
           onPressed:
               () => _uiService.showSummaryScreen(
-                context,
-                _viewModel.selectedText,
-              ),
+            context,
+            _viewModel.selectedText,
+          ),
           tooltip: 'Summarize',
           icon: const Icon(Icons.summarize, color: Colors.white, size: 24),
         ),
       ],
-      if (_viewModel.pdfDocument != null)
-        IconButton(
-          onPressed: _jumpToPage,
-          tooltip: 'Go to page',
-          icon: const Icon(Icons.numbers, color: Colors.white, size: 24),
-        ),
+      IconButton(
+        onPressed: _showApiTokenSettings,
+        tooltip: 'API Settings',
+        icon: const Icon(Icons.settings, color: Colors.white, size: 24),
+      ),
       IconButton(
         onPressed: () => _viewModel.pickPdf(_showErrorSnackBar),
         tooltip: 'Open PDF',
@@ -391,5 +396,15 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
       if (!mounted) return;
       FocusScope.of(context).unfocus();
     }
+  }
+
+  Future<void> _showApiTokenSettings() async {
+    _viewModel.showAppBar();
+
+    final currentContext = context;
+    await _uiService.showApiTokenSettingsDialog(currentContext);
+
+    if (!mounted) return;
+    FocusScope.of(context).unfocus();
   }
 }
